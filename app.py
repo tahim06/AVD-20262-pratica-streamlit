@@ -184,7 +184,7 @@ with aba2:
             )
             barras_setor = alt.Chart(por_setor).mark_bar(color=ROXO_MEDIO).encode(
                 x=alt.X("mediana:Q", title="Salário mediano (USD)", axis=alt.Axis(format="$,.0f")),
-                y=alt.Y("setor:N", sort="-x", title=None),
+                y=alt.Y("setor:N", sort="-x", title=None, axis=alt.Axis(labelLimit=220)),
                 opacity=alt.condition(clique, alt.value(1), alt.value(0.35)),
                 tooltip=[
                     alt.Tooltip("setor:N", title="Setor"),
@@ -203,7 +203,7 @@ with aba2:
             st.markdown(f"**Vagas por cidade e modalidade** ({recorte})")
             barras_cidade = alt.Chart(df_d2).mark_bar().encode(
                 x=alt.X("count()", title="Vagas"),
-                y=alt.Y("cidade:N", sort="-x", title=None),
+                y=alt.Y("cidade:N", sort="-x", title=None, axis=alt.Axis(labelOverlap=False)),
                 color=alt.Color("modalidade:N", scale=CORES_MODALIDADE, title="Modalidade",
                                 legend=alt.Legend(orient="bottom")),
                 tooltip=["cidade", "modalidade", alt.Tooltip("count()", title="Vagas")],
