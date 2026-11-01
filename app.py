@@ -4,44 +4,61 @@ import streamlit as st
 
 from src.data_loader import load_data
 
-st.set_page_config(
-    page_title="Avaliação de Correlação entre Variáveis Quantitativas do Heart Disease Dataset",
-    layout="wide",
-)
+st.set_page_config(page_title="Vagas de Tecnologia 2025", page_icon="💼", layout="wide")
 
-st.title("Avaliação de Correlação entre Variáveis Quantitativas do Heart Disease Dataset")
+st.title("Vagas de tecnologia em 2025: salários e demanda")
+st.caption("Dataset Future Jobs & Skills Demand 2025 (Kaggle, dados sintéticos) com 10 mil vagas em quatro setores.")
 
 df = load_data()
 
-# Variáveis quantitativas do estudo (mesma lista VARS_QUANT do notebook de EDA)
-VARS_QUANT = ["age", "trestbps", "chol", "thalach", "oldpeak"]
+# Paleta da EDA
+ROXO = "#2d223a"
+ROXO_MEDIO = "#5b3f8c"
+ROSE = "#d4a5a0"
+CORES_MODALIDADE = alt.Scale(domain=["Remoto", "Presencial"], range=[ROXO_MEDIO, ROSE])
 
-# Sidebar: filtros (variáveis + intervalo)
+# Variáveis quantitativas do Dashboard 1 (as derivadas foram criadas no notebook de tratamento)
+NOMES = {
+    "salary_usd": "Salário anual (USD)",
+    "porte_empresa_num": "Porte da empresa (1 a 3)",
+    "mes_publicacao": "Mês de publicação",
+    "dia_semana_num": "Dia da semana (1 = seg)",
+    "demanda_cargo_cidade": "Vagas do mesmo cargo na cidade",
+}
+VARS_QUANT = list(NOMES)
+
+
+def br(valor, casas=0):
+    """Formata número no padrão brasileiro (1.234,5)."""
+    return f"{valor:,.{casas}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+# ---------------- Sidebar ----------------
 with st.sidebar:
     st.header("Filtros")
 
+    setores = st.multiselect("Setores", sorted(df["setor"].unique()), default=sorted(df["setor"].unique()))
+    cidades = st.multiselect("Cidades", sorted(df["cidade"].unique()), default=sorted(df["cidade"].unique()))
+
+    st.divider()
+    st.subheader("Laboratório (Dashboard 1)")
+
     variaveis = st.multiselect(
-        "Variáveis Quantitativas",
+        "Variáveis quantitativas",
         options=VARS_QUANT,
         default=VARS_QUANT,
-        help="Selecione as variáveis quantitativas que deseja analisar no dashboard.",
+        format_func=NOMES.get,
     )
 
-    separar_por_classe = st.toggle(
-        "Distinguir por Classe",
-        value=False,
-        help="Colore a distribuição pela classe (doenca_cardiaca: Normal ou Cardíaco).",
-    )
+    separar_modalidade = st.toggle("Separar histogramas por modalidade", value=False)
 
-    # Um slider de intervalo para cada variável selecionada
+    st.caption("Use os intervalos para tirar valores da análise e ver se a correlação muda.")
     intervalos = {}
     for var in variaveis:
-        if pd.api.types.is_integer_dtype(df[var]):
-            minimo, maximo, passo = int(df[var].min()), int(df[var].max()), 1
-        else:
-            minimo, maximo, passo = float(df[var].min()), float(df[var].max()), 0.1
+        minimo, maximo = int(df[var].min()), int(df[var].max())
+        passo = 1000 if var == "salary_usd" else 1
         intervalos[var] = st.slider(
-            f"Intervalo de {var}",
+            NOMES[var],
             min_value=minimo,
             max_value=maximo,
             value=(minimo, maximo),
@@ -49,125 +66,181 @@ with st.sidebar:
             key=f"intervalo_{var}",
         )
 
-# Mantém só os pacientes dentro de todos os intervalos escolhidos
-df_filtrado = df
+df_filtrado = df[df["setor"].isin(setores) & df["cidade"].isin(cidades)]
 for var, (inicio, fim) in intervalos.items():
     df_filtrado = df_filtrado[df_filtrado[var].between(inicio, fim)]
 
-st.caption(f"{len(df_filtrado)} de {len(df)} pacientes dentro dos intervalos escolhidos.")
+st.caption(f"{br(len(df_filtrado))} de {br(len(df))} vagas dentro dos filtros.")
 
-# Dashboard 1: correlação (heatmap) à esquerda, distribuição (histograma) à direita
-col_correlacao, col_distribuicao = st.columns([1, 1.5])
+aba1, aba2 = st.tabs(["Dashboard 1: correlação e distribuição", "Dashboard 2: indicadores para quem procura vaga"])
 
-# Cores do histograma, em tons de sangue: vermelho arterial para Cardíaco, rosa claro para Normal
-COR_NORMAL = "#f4a6a6"
-COR_CARDIACO = "#c1121f"
-COR_HISTOGRAMA = COR_CARDIACO
-CORES_CLASSE = alt.Scale(domain=["Normal", "Cardíaco"], range=[COR_NORMAL, COR_CARDIACO])
 
-# Legenda das classes em texto, para caber no espaço livre da grade de histogramas
-LEGENDA_CLASSE = (
-    f"**Classe**  \n"
-    f":color[■]{{foreground=\"{COR_NORMAL}\"}} Normal  \n"
-    f":color[■]{{foreground=\"{COR_CARDIACO}\"}} Cardíaco"
-)
+# ---------------- Dashboard 1 ----------------
+with aba1:
+    col_corr, col_dist = st.columns([1, 1.4])
 
-with col_correlacao:
-    st.subheader("Correlação (Spearman)")
+    with col_corr:
+        st.subheader("Correlação de Spearman")
 
-    if len(variaveis) < 2:
-        st.warning("Selecione pelo menos 2 variáveis para calcular a correlação.")
-    elif len(df_filtrado) < 30:
-        st.warning("Poucos pacientes nos intervalos escolhidos para calcular a correlação.")
-    else:
-        # Matriz de correlação de Spearman das variáveis selecionadas, em formato longo (uma linha por célula)
-        corr = (
-            df_filtrado[variaveis]
-            .corr(method="spearman")
-            .rename_axis(index="var_y", columns="var_x")
-            .stack()
-            .rename("correlacao")
-            .reset_index()
-        )
-        # Só o triângulo inferior, sem a diagonal (sempre 1): a matriz é simétrica, o resto é repetição
-        ordem = {var: i for i, var in enumerate(variaveis)}
-        corr = corr[corr["var_y"].map(ordem) > corr["var_x"].map(ordem)]
+        if len(variaveis) < 2:
+            st.info("Escolha pelo menos 2 variáveis na barra lateral para calcular a correlação.")
+        elif len(df_filtrado) < 30:
+            st.warning("Menos de 30 vagas nos filtros atuais. Amplie os intervalos para calcular a correlação.")
+        else:
+            corr = df_filtrado[variaveis].corr(method="spearman")
+            nomes_ordem = [NOMES[v] for v in variaveis]
+            corr.index = corr.columns = nomes_ordem
 
-        base = alt.Chart(corr).encode(
-            x=alt.X(
-                "var_x:N",
-                title=None,
-                sort=variaveis[:-1],  # a última variável só aparece nas linhas
-                axis=alt.Axis(labelAngle=0, labelFontSize=14),
-            ),
-            y=alt.Y("var_y:N", title=None, sort=variaveis[1:], axis=alt.Axis(labelFontSize=14)),  # a primeira só nas colunas
-        )
-        heatmap = base.mark_rect().encode(
-            color=alt.Color(
-                "correlacao:Q",
-                title="Spearman",
-                scale=alt.Scale(scheme="redblue", domain=[-1, 1], reverse=True),
-                legend=alt.Legend(titleFontSize=14, labelFontSize=13),
-            ),
-            tooltip=["var_x", "var_y", alt.Tooltip("correlacao:Q", format=".2f")],
-        )
-        valores = base.mark_text(fontSize=16).encode(
-            text=alt.Text("correlacao:Q", format=".2f"),
-            color=alt.condition(
-                "abs(datum.correlacao) > 0.5", alt.value("white"), alt.value("black")
-            ),
-        )
+            corr_longa = corr.stack().reset_index()
+            corr_longa.columns = ["linha", "coluna", "rho"]
 
-        st.altair_chart(
-            (heatmap + valores).properties(height=380),
-            width="stretch",
-            alt="Mapa de calor (triângulo inferior, sem a diagonal) da correlação de Spearman entre as variáveis quantitativas selecionadas",
-        )
+            # só o triângulo de baixo, sem a diagonal
+            pos = {nome: i for i, nome in enumerate(nomes_ordem)}
+            corr_longa = corr_longa[corr_longa["linha"].map(pos) > corr_longa["coluna"].map(pos)]
 
-with col_distribuicao:
-    st.subheader("Distribuição")
+            base = alt.Chart(corr_longa).encode(
+                x=alt.X("coluna:N", sort=nomes_ordem[:-1], title=None, axis=alt.Axis(labelAngle=-30, labelLimit=160)),
+                y=alt.Y("linha:N", sort=nomes_ordem[1:], title=None, axis=alt.Axis(labelLimit=180)),
+            )
+            mapa = base.mark_rect(stroke="white").encode(
+                color=alt.Color(
+                    "rho:Q",
+                    title="ρ",
+                    scale=alt.Scale(scheme="purpleorange", domain=[-1, 1], reverse=True),
+                ),
+                tooltip=[
+                    alt.Tooltip("linha:N", title="Variável"),
+                    alt.Tooltip("coluna:N", title="Com"),
+                    alt.Tooltip("rho:Q", title="Spearman", format=".2f"),
+                ],
+            )
+            textos = base.mark_text(fontSize=14).encode(
+                text=alt.Text("rho:Q", format=".2f"),
+                color=alt.condition("abs(datum.rho) > 0.5", alt.value("white"), alt.value(ROXO)),
+            )
+            st.altair_chart((mapa + textos).properties(height=380), width="stretch")
 
-    if not variaveis:
-        st.warning("Selecione pelo menos 1 variável para ver a distribuição.")
-    elif df_filtrado.empty:
-        st.warning("Nenhum paciente dentro dos intervalos escolhidos.")
-    else:
-        # Com número par de variáveis não sobra espaço na grade: a legenda vai acima dela
-        if separar_por_classe and len(variaveis) % 2 == 0:
-            st.markdown(LEGENDA_CLASSE)
+            maior = corr_longa.loc[corr_longa["rho"].abs().idxmax()]
+            st.caption(
+                f"Maior correlação em módulo: {maior['linha']} × {maior['coluna']} (ρ = {br(maior['rho'], 2)}). "
+                "Abaixo de 0,3 em módulo a relação é considerada fraca."
+            )
 
-        # Um histograma por variável selecionada, em grade de 2 colunas (cada um com a sua escala)
-        for inicio in range(0, len(variaveis), 2):
-            colunas = st.columns(2)
-            for coluna, var in zip(colunas, variaveis[inicio : inicio + 2]):
-                histograma = (
-                    alt.Chart(df_filtrado[[var, "doenca_cardiaca"]])
-                    .mark_bar()
-                    .encode(
-                        x=alt.X(f"{var}:Q", bin=alt.Bin(maxbins=20), title=var),
-                        y=alt.Y("count()", title="Pacientes"),
-                        tooltip=[alt.Tooltip("count()", title="Pacientes")],
+    with col_dist:
+        st.subheader("Distribuição")
+
+        if not variaveis:
+            st.info("Escolha pelo menos 1 variável para ver a distribuição.")
+        elif df_filtrado.empty:
+            st.warning("Nenhuma vaga dentro dos filtros atuais.")
+        else:
+            for i in range(0, len(variaveis), 2):
+                colunas = st.columns(2)
+                for coluna, var in zip(colunas, variaveis[i:i + 2]):
+                    # variáveis com poucos valores ficam melhores com uma barra por valor
+                    poucos_valores = df_filtrado[var].nunique() <= 12
+                    eixo_x = (
+                        alt.X(f"{var}:O", title=NOMES[var], axis=alt.Axis(labelAngle=0))
+                        if poucos_valores
+                        else alt.X(f"{var}:Q", bin=alt.Bin(maxbins=20), title=NOMES[var])
                     )
-                    .properties(height=200)
-                )
-                if separar_por_classe:
-                    histograma = histograma.encode(
-                        color=alt.Color(
-                            "doenca_cardiaca:N",
-                            title="Classe",
-                            scale=CORES_CLASSE,
-                            legend=None,
-                        ),
-                        tooltip=["doenca_cardiaca", alt.Tooltip("count()", title="Pacientes")],
-                    )
-                else:
-                    histograma = histograma.mark_bar(color=COR_HISTOGRAMA)
+                    hist = alt.Chart(df_filtrado[[var, "modalidade"]]).mark_bar().encode(
+                        x=eixo_x,
+                        y=alt.Y("count()", title="Vagas"),
+                        tooltip=[alt.Tooltip("count()", title="Vagas")],
+                    ).properties(height=210)
 
-                with coluna:
-                    st.altair_chart(histograma, width="stretch", alt=f"Histograma da variável {var}")
+                    if separar_modalidade:
+                        hist = hist.encode(
+                            color=alt.Color("modalidade:N", scale=CORES_MODALIDADE, title="Modalidade",
+                                            legend=alt.Legend(orient="top")),
+                            tooltip=["modalidade", alt.Tooltip("count()", title="Vagas")],
+                        )
+                    else:
+                        hist = hist.mark_bar(color=ROXO_MEDIO)
 
-            # Número ímpar de variáveis: a legenda ocupa o espaço que sobrou na última linha
-            if separar_por_classe and len(colunas) == 2 and len(variaveis[inicio : inicio + 2]) == 1:
-                colunas[1].markdown(LEGENDA_CLASSE)
+                    with coluna:
+                        st.altair_chart(hist, width="stretch")
 
-# TODO: Dashboard 2 — KPIs (Aula 22)
+
+# ---------------- Dashboard 2 ----------------
+with aba2:
+    st.markdown(
+        "Para estudantes e profissionais de tecnologia que estão decidindo em qual setor e cidade procurar vaga. "
+        "Clique em uma barra do primeiro gráfico para ver os números só daquele setor (clique de novo no fundo para limpar)."
+    )
+
+    if df_filtrado.empty:
+        st.warning("Nenhuma vaga dentro dos filtros atuais. Ajuste a barra lateral.")
+    else:
+        area_kpis = st.container()
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.markdown("**Salário mediano por setor**")
+            clique = alt.selection_point(name="setor_sel", fields=["setor"])
+            por_setor = df_filtrado.groupby("setor", as_index=False).agg(
+                mediana=("salary_usd", "median"), vagas=("salary_usd", "size")
+            )
+            barras_setor = alt.Chart(por_setor).mark_bar(color=ROXO_MEDIO).encode(
+                x=alt.X("mediana:Q", title="Salário mediano (USD)", axis=alt.Axis(format="$,.0f")),
+                y=alt.Y("setor:N", sort="-x", title=None),
+                opacity=alt.condition(clique, alt.value(1), alt.value(0.35)),
+                tooltip=[
+                    alt.Tooltip("setor:N", title="Setor"),
+                    alt.Tooltip("mediana:Q", title="Mediana", format="$,.0f"),
+                    alt.Tooltip("vagas:Q", title="Vagas"),
+                ],
+            ).add_params(clique).properties(height=260)
+
+            evento = st.altair_chart(barras_setor, key="grafico_setor", on_select="rerun", width="stretch")
+
+        setores_clicados = [item["setor"] for item in evento.selection.get("setor_sel", [])]
+        df_d2 = df_filtrado[df_filtrado["setor"].isin(setores_clicados)] if setores_clicados else df_filtrado
+        recorte = ", ".join(setores_clicados) if setores_clicados else "todos os setores filtrados"
+
+        with col_b:
+            st.markdown(f"**Vagas por cidade e modalidade** ({recorte})")
+            barras_cidade = alt.Chart(df_d2).mark_bar().encode(
+                x=alt.X("count()", title="Vagas"),
+                y=alt.Y("cidade:N", sort="-x", title=None),
+                color=alt.Color("modalidade:N", scale=CORES_MODALIDADE, title="Modalidade",
+                                legend=alt.Legend(orient="bottom")),
+                tooltip=["cidade", "modalidade", alt.Tooltip("count()", title="Vagas")],
+            ).properties(height=260)
+            st.altair_chart(barras_cidade, width="stretch")
+
+        st.markdown(f"**Vagas por faixa salarial e porte da empresa** ({recorte})")
+        barras_faixa = alt.Chart(df_d2).mark_bar().encode(
+            x=alt.X("faixa_salarial:N", title="Faixa salarial (USD)",
+                    sort=["50-100 mil", "100-150 mil", "150-200 mil", "200-250 mil"], axis=alt.Axis(labelAngle=0)),
+            xOffset=alt.XOffset("porte_empresa:N", sort=["Pequena", "Média", "Grande"]),
+            y=alt.Y("count()", title="Vagas"),
+            color=alt.Color("porte_empresa:N", title="Porte", sort=["Pequena", "Média", "Grande"],
+                            scale=alt.Scale(range=[ROSE, "#9b7bb8", ROXO])),
+            tooltip=["faixa_salarial", "porte_empresa", alt.Tooltip("count()", title="Vagas")],
+        ).properties(height=280)
+        st.altair_chart(barras_faixa, width="stretch")
+
+        # KPIs ficam no topo, mas são calculados depois para já considerar o clique no gráfico
+        with area_kpis:
+            mediana_geral = df_filtrado["salary_usd"].median()
+            mediana_recorte = df_d2["salary_usd"].median()
+            pct_remoto_geral = (df_filtrado["modalidade"] == "Remoto").mean() * 100
+            pct_remoto = (df_d2["modalidade"] == "Remoto").mean() * 100
+            pct_acima_200 = (df_d2["salary_usd"] >= 200_000).mean() * 100
+            cargo_top = df_d2["cargo"].value_counts()
+
+            delta_salario = delta_remoto = None
+            if setores_clicados:
+                var_salario = (mediana_recorte / mediana_geral - 1) * 100
+                var_remoto = pct_remoto - pct_remoto_geral
+                delta_salario = f"{'+' if var_salario >= 0 else ''}{br(var_salario, 1)}% vs. filtro geral"
+                delta_remoto = f"{'+' if var_remoto >= 0 else ''}{br(var_remoto, 1)} p.p. vs. filtro geral"
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Vagas", br(len(df_d2)))
+            k2.metric("Salário mediano", f"US$ {br(mediana_recorte)}", delta=delta_salario)
+            k3.metric("Vagas remotas", f"{br(pct_remoto, 1)}%", delta=delta_remoto)
+            k4.metric("Vagas pagando US$ 200 mil ou mais", f"{br(pct_acima_200, 1)}%")
+            st.caption(f"Cargo com mais vagas no recorte: {cargo_top.index[0]} ({cargo_top.iloc[0]} vagas).")
