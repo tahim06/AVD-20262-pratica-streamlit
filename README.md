@@ -6,7 +6,7 @@ App em Streamlit com dois dashboards construídos a partir da minha EDA da Aula 
 [Future Jobs & Skills Demand 2025](https://www.kaggle.com/datasets/ahsanneural/future-jobs-and-skills-demand-2025)
 (10 mil vagas sintéticas nos setores de IA, Blockchain, Tecnologia Verde e Computação Quântica, licença CC0).
 
-**Link do app:** (preencher após o deploy)
+**Link do app:** https://vagas-tecnologia-2025-thiago.streamlit.app
 
 ## Dashboards
 
